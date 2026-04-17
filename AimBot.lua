@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -22,31 +23,149 @@ local currentTarget = nil
 local lastFireTime = 0
 local lastUpdateTime = 0
 local playerCache = {}
+local isScriptActive = true
 
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Visible = true
-FOVCircle.Radius = Settings.FOV
-FOVCircle.Color = Color3.fromRGB(255, 0, 0)
-FOVCircle.Thickness = 2
-FOVCircle.NumSides = 60
-FOVCircle.Filled = false
+-- Drawing nesnelerini tutacak değişkenler
+local FOVCircle = nil
+local TargetCircle = nil
+local TargetInfo = nil
 
-local TargetCircle = Drawing.new("Circle")
-TargetCircle.Radius = 10
-TargetCircle.Color = Color3.fromRGB(255, 0, 0)
-TargetCircle.Thickness = 2
-TargetCircle.NumSides = 20
-TargetCircle.Filled = false
-TargetCircle.Visible = false
+-- GUI Butonu Oluştur
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AimbotGUI"
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-local TargetInfo = Drawing.new("Text")
-TargetInfo.Size = 14
-TargetInfo.Center = true
-TargetInfo.Outline = true
-TargetInfo.Color = Color3.fromRGB(255, 255, 255)
-TargetInfo.Visible = false
+local closeButton = Instance.new("ImageButton")
+closeButton.Size = UDim2.new(0, 40, 0, 40)
+closeButton.Position = UDim2.new(1, -50, 0, 10)
+closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+closeButton.BackgroundTransparency = 0.2
+closeButton.BorderSizePixel = 0
+closeButton.Image = "rbxassetid://3926305904"
+closeButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Parent = screenGui
 
+-- Buton hover efekti
+local function animateButton(button, targetTransparency)
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(button, tweenInfo, {BackgroundTransparency = targetTransparency})
+    tween:Play()
+end
+
+closeButton.MouseEnter:Connect(function()
+    animateButton(closeButton, 0.5)
+end)
+
+closeButton.MouseLeave:Connect(function()
+    animateButton(closeButton, 0.2)
+end)
+
+-- Tüm Drawing nesnelerini temizleme fonksiyonu
+local function ClearDrawings()
+    if FOVCircle then
+        FOVCircle.Visible = false
+        FOVCircle:Remove()
+        FOVCircle = nil
+    end
+    
+    if TargetCircle then
+        TargetCircle.Visible = false
+        TargetCircle:Remove()
+        TargetCircle = nil
+    end
+    
+    if TargetInfo then
+        TargetInfo.Visible = false
+        TargetInfo:Remove()
+        TargetInfo = nil
+    end
+end
+
+-- Drawing nesnelerini oluşturma fonksiyonu
+local function CreateDrawings()
+    ClearDrawings() -- Önce varsa temizle
+    
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Visible = true
+    FOVCircle.Radius = Settings.FOV
+    FOVCircle.Color = Color3.fromRGB(255, 0, 0)
+    FOVCircle.Thickness = 2
+    FOVCircle.NumSides = 60
+    FOVCircle.Filled = false
+    
+    TargetCircle = Drawing.new("Circle")
+    TargetCircle.Radius = 10
+    TargetCircle.Color = Color3.fromRGB(255, 0, 0)
+    TargetCircle.Thickness = 2
+    TargetCircle.NumSides = 20
+    TargetCircle.Filled = false
+    TargetCircle.Visible = false
+    
+    TargetInfo = Drawing.new("Text")
+    TargetInfo.Size = 14
+    TargetInfo.Center = true
+    TargetInfo.Outline = true
+    TargetInfo.Color = Color3.fromRGB(255, 255, 255)
+    TargetInfo.Visible = false
+end
+
+-- Butona tıklama işlevi (tam temizlik)
+closeButton.MouseButton1Click:Connect(function()
+    if not isScriptActive then return end
+    
+    isScriptActive = false
+    
+    -- Tüm Drawing nesnelerini temizle (FOV dairesi dahil)
+    ClearDrawings()
+    
+    -- GUI'yi temizle
+    if screenGui then
+        screenGui:Destroy()
+    end
+    
+    -- Tüm bağlantıları temizle
+    if _renderStepConnection then
+        RunService:UnbindFromRenderStep("Aimbot")
+        _renderStepConnection = nil
+    end
+    
+    if _renderSteppedConnection1 then
+        _renderSteppedConnection1:Disconnect()
+        _renderSteppedConnection1 = nil
+    end
+    
+    if _renderSteppedConnection2 then
+        _renderSteppedConnection2:Disconnect()
+        _renderSteppedConnection2 = nil
+    end
+    
+    if _inputConnection then
+        _inputConnection:Disconnect()
+        _inputConnection = nil
+    end
+    
+    -- Değişkenleri temizle
+    currentTarget = nil
+    playerCache = nil
+    
+    -- Settings tablosunu temizle
+    if Settings then
+        for key in pairs(Settings) do
+            Settings[key] = nil
+        end
+        Settings = nil
+    end
+    
+    print("Aimbot script başarıyla kapatıldı ve tüm çizimler (FOV dairesi dahil) temizlendi!")
+end)
+
+-- Drawing nesnelerini oluştur
+CreateDrawings()
+
+-- Fonksiyonlar
 local function IsVisible(targetPart)
+    if not isScriptActive then return false end
+    
     local origin = Camera.CFrame.Position
     local direction = targetPart.Position - origin
     
@@ -64,6 +183,8 @@ local function IsVisible(targetPart)
 end
 
 local function GetClosestTarget()
+    if not isScriptActive then return nil end
+    
     local closestTarget = nil
     local closestDistance = Settings.FOV
     local mousePos = Vector2.new(mouse.X, mouse.Y)
@@ -111,6 +232,7 @@ local function GetClosestTarget()
 end
 
 local function AutoFire()
+    if not isScriptActive then return end
     if not Settings.AutoFire or not currentTarget then return end
     
     if not IsVisible(currentTarget) then
@@ -124,18 +246,23 @@ local function AutoFire()
     end
 end
 
-RunService.RenderStepped:Connect(function()
+-- RenderStepped bağlantıları
+local _renderSteppedConnection1 = RunService.RenderStepped:Connect(function()
+    if not isScriptActive or not FOVCircle then return end
+    
     local mousePos = Vector2.new(mouse.X, mouse.Y)
     FOVCircle.Position = mousePos
     
-    if Settings.AimbotEnabled then
+    if Settings and Settings.AimbotEnabled then
         FOVCircle.Color = currentTarget and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 255, 0)
-    else
+    elseif FOVCircle then
         FOVCircle.Color = Color3.fromRGB(255, 0, 0)
     end
 end)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+local _inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not isScriptActive then return end
+    
     if not gameProcessed and input.KeyCode == Enum.KeyCode.Q then
         Settings.AimbotEnabled = not Settings.AimbotEnabled
         if not Settings.AimbotEnabled then
@@ -144,7 +271,9 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
-RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, function()
+local _renderStepConnection = RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, function()
+    if not isScriptActive then return end
+    
     if Settings.AimbotEnabled then
         currentTarget = GetClosestTarget()
         
@@ -157,8 +286,10 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
     end
 end)
 
-RunService.RenderStepped:Connect(function()
-    if currentTarget and Settings.AimbotEnabled then
+local _renderSteppedConnection2 = RunService.RenderStepped:Connect(function()
+    if not isScriptActive then return end
+    
+    if currentTarget and Settings.AimbotEnabled and TargetCircle and TargetInfo then
         local screenPos, onScreen = Camera:WorldToViewportPoint(currentTarget.Position)
         
         if onScreen then
@@ -191,8 +322,13 @@ RunService.RenderStepped:Connect(function()
             TargetCircle.Visible = false
             TargetInfo.Visible = false
         end
-    else
+    elseif TargetCircle and TargetInfo then
         TargetCircle.Visible = false
         TargetInfo.Visible = false
     end
 end)
+
+print("Aimbot script başarıyla başlatıldı!")
+print("Q tuşu ile aimbot'u açıp kapatabilirsiniz")
+print("Sağ üstteki kırmızı X butonuna tıklayarak scripti tamamen kapatabilirsiniz")
+print("Not: Kapatınca FOV dairesi ve diğer tüm çizimler tamamen silinecektir")
